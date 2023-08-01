@@ -1,7 +1,9 @@
 [workspace]
+resolver = "2"
 
 members = [
     "async-executor",
     "reika-macros",
     "reika-storage",
+    "reika-reactor",
 ]

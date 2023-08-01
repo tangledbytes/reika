@@ -11,6 +11,10 @@ name = "reika-macros"
 version = "0.1.0"
 
 [[package]]
+name = "reika-reactor"
+version = "0.1.0"
+
+[[package]]
 name = "reika-storage"
 version = "0.1.0"
 dependencies = [
