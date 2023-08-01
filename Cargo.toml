@@ -1,0 +1,7 @@
+[workspace]
+
+members = [
+    "async-executor",
+    "reika-macros",
+    "reika-storage",
+]

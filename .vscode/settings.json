@@ -1,0 +1,3 @@
+{
+	"rust-analyzer.cargo.features": [ "arch-std", "executor-thread", "integrated-timers", "nightly" ],
+}
