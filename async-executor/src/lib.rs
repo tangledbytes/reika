@@ -1,7 +1,4 @@
 #![no_std]
-#![allow(dead_code)] // TODO: Remove this
-#![allow(unused)] // TODO: Remove this
-#![feature(type_alias_impl_trait)]
 
 extern crate alloc;
 
@@ -10,8 +7,7 @@ mod spawner;
 mod util;
 mod waker;
 
-use core::future::{poll_fn, Future};
-use core::marker::PhantomData;
+use core::future::Future;
 use core::mem;
 use core::pin::Pin;
 use core::task::{Context, Poll};
@@ -172,13 +168,13 @@ impl Executor {
     ///
     /// This function WILL do a heap allocation. Use `spawn_task`
     /// for 0 dynamic allocation.
-    /// 
+    ///
     /// NOTE: This will leak memory!
     pub fn spawn<F: Future + 'static>(&'static self, future: F) {
         let boxed = Box::new(TaskStorage::new());
         let leaked = Box::leak(boxed);
 
-        let task = leaked.prepare_task(|| { future });
+        let task = leaked.prepare_task(|| future);
         self.enqueue(task);
     }
 

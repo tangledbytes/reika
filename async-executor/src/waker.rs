@@ -1,4 +1,3 @@
-use core::mem;
 use core::task::{RawWaker, RawWakerVTable, Waker};
 
 use super::{wake_task, TaskHeader, TaskRef};
