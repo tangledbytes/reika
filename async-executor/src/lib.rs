@@ -146,12 +146,6 @@ impl<F: Future + 'static> TaskStorage<F> {
     }
 }
 
-// unsafe impl<F> Send for TaskStorage<F>
-// where F: Future + 'static {}
-
-// unsafe impl<F> Sync for TaskStorage<F>
-// where F: Future + 'static {}
-
 /// Reika Async Executor
 pub struct Executor {
     task_queue: TaskQueue,
@@ -170,7 +164,7 @@ impl Executor {
     /// This function relies on a TaskRef to already exist which can be
     /// created via static TaskStorage. This ensures that no dynamic memory
     /// allocation happens but this also makes this interface harder to consume
-    pub fn spawn_task(&self, t: TaskRef) {
+    pub fn spawn_task(&'static self, t: TaskRef) {
         self.enqueue(t);
     }
 
@@ -178,7 +172,9 @@ impl Executor {
     ///
     /// This function WILL do a heap allocation. Use `spawn_task`
     /// for 0 dynamic allocation.
-    pub fn spawn<F: Future + 'static>(&self, future: F) {
+    /// 
+    /// NOTE: This will leak memory!
+    pub fn spawn<F: Future + 'static>(&'static self, future: F) {
         let boxed = Box::new(TaskStorage::new());
         let leaked = Box::leak(boxed);
 
@@ -187,7 +183,7 @@ impl Executor {
     }
 
     /// run starts a busy loop and keep polling the tasks forever
-    pub fn run(&self, mut post_drain_fn: Option<impl FnMut()>) -> ! {
+    pub fn run(&'static self, mut post_drain_fn: Option<impl FnMut()>) -> ! {
         loop {
             // Drain the user tasks
             self.task_queue.drain(|taskptr| {
@@ -205,8 +201,9 @@ impl Executor {
         }
     }
 
-    pub(crate) fn enqueue(&self, t: TaskRef) {
+    pub(crate) fn enqueue(&'static self, t: TaskRef) {
         unsafe {
+            t.header().executor.get().replace(Some(self));
             self.task_queue.enqueue(t);
         }
     }
