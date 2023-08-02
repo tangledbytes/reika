@@ -6,4 +6,5 @@ members = [
     "reika-macros",
     "reika-storage",
     "reika-reactor",
+    "async-executor-util"
 ]

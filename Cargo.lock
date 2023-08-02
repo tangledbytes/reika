@@ -7,6 +7,13 @@ name = "async-executor"
 version = "0.1.0"
 
 [[package]]
+name = "async-executor-util"
+version = "0.1.0"
+dependencies = [
+ "async-executor",
+]
+
+[[package]]
 name = "reika-macros"
 version = "0.1.0"
 
@@ -18,5 +25,5 @@ version = "0.1.0"
 name = "reika-storage"
 version = "0.1.0"
 dependencies = [
- "async-executor",
+ "async-executor-util",
 ]
