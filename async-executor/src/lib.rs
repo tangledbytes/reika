@@ -1,7 +1,5 @@
 #![no_std]
 
-extern crate alloc;
-
 mod queue;
 mod spawner;
 mod util;
@@ -14,8 +12,6 @@ use core::task::{Context, Poll};
 use core::{cell::UnsafeCell, ptr::NonNull};
 use queue::TaskQueue;
 use util::UninitCell;
-
-use alloc::boxed::Box;
 
 /// TaskHeader contains the raw data regarding any task, the tasks are an abstraction on top of
 /// futures and hence the task header contains the raw data that is required to run a future.
@@ -162,20 +158,6 @@ impl Executor {
     /// allocation happens but this also makes this interface harder to consume
     pub fn spawn_task(&'static self, t: TaskRef) {
         self.enqueue(t);
-    }
-
-    /// spawn consumes a future and enqueus it for running
-    ///
-    /// This function WILL do a heap allocation. Use `spawn_task`
-    /// for 0 dynamic allocation.
-    ///
-    /// NOTE: This will leak memory!
-    pub fn spawn<F: Future + 'static>(&'static self, future: F) {
-        let boxed = Box::new(TaskStorage::new());
-        let leaked = Box::leak(boxed);
-
-        let task = leaked.prepare_task(|| future);
-        self.enqueue(task);
     }
 
     /// run starts a busy loop and keep polling the tasks forever

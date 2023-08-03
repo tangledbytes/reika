@@ -46,7 +46,12 @@ impl PerThreadExecutor {
             // # Safety: This is safe because this static is never
             // going to outlive the running thread.
             let static_ex = unsafe { _make_static(ex) };
-            static_ex.spawn(fut);
+
+            let boxed = Box::new(TaskStorage::new());
+            let leaked = Box::leak(boxed);
+            let task = leaked.prepare_task(|| fut);
+
+            static_ex.spawn_task(task);
         });
     }
 
