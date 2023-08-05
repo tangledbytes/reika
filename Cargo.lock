@@ -125,6 +125,7 @@ dependencies = [
  "async-executor",
  "async-executor-util",
  "reika-macros",
+ "reika-reactor",
 ]
 
 [[package]]
