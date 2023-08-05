@@ -6,4 +6,7 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
+async-executor-util = { path = "../async-executor-util" }
+reika-macros = { path = "../reika-macros" }
 async-executor = { path = "../async-executor" }
+reika-reactor = { path = "../reika-reactor" }
