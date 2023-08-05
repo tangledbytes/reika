@@ -2,11 +2,42 @@ extern crate proc_macro;
 
 use proc_macro::TokenStream as TS;
 
-use proc_macro2::{Ident, TokenStream};
+use darling::ast::NestedMeta;
+use darling::FromMeta;
+use proc_macro2::{Span, TokenStream};
 use quote::{format_ident, quote};
-use syn::{parse_quote, ItemFn, ReturnType, Type};
+use syn::parse::{Parse, ParseBuffer};
+use syn::punctuated::Punctuated;
+use syn::Token;
+use syn::{parse_quote, Expr, ExprLit, ItemFn, Lit, LitInt, ReturnType, Type};
 
-fn task_run(f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
+struct Args {
+    meta: Vec<NestedMeta>,
+}
+
+impl Parse for Args {
+    fn parse(input: &ParseBuffer) -> syn::Result<Self> {
+        let meta = Punctuated::<NestedMeta, Token![,]>::parse_terminated(input)?;
+        Ok(Args {
+            meta: meta.into_iter().collect(),
+        })
+    }
+}
+
+#[derive(Debug, FromMeta)]
+struct Args2 {
+    #[darling(default)]
+    pool_size: Option<syn::Expr>,
+}
+
+fn task_pool_run(args: &[NestedMeta], f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
+    let args = Args2::from_list(args).map_err(|e| e.write_errors())?;
+
+    let pool_size = args.pool_size.unwrap_or(Expr::Lit(ExprLit {
+        attrs: vec![],
+        lit: Lit::Int(LitInt::new("1", Span::call_site())),
+    }));
+
     if f.sig.asyncness.is_none() {
         let err = syn::Error::new_spanned(&f.sig, "task functions must be async");
         return Err(syn::Error::to_compile_error(&err));
@@ -70,8 +101,6 @@ fn task_run(f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
 
     let task_ident = f.sig.ident.clone();
     let task_inner_ident = format_ident!("__{}_task", task_ident);
-    let storage_name_str = format!("__STORAGE_{}_task", task_ident);
-    let task_storage_ident = Ident::new(&storage_name_str.to_uppercase(), task_ident.span());
 
     let mut task_inner = f;
     let visibility = task_inner.vis.clone();
@@ -79,10 +108,11 @@ fn task_run(f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
     task_inner.sig.ident = task_inner_ident.clone();
 
     let mut task_outer: ItemFn = parse_quote! {
-        #visibility fn #task_ident(#fargs) -> ::async_executor::TaskRef {
+        #visibility fn #task_ident(#fargs) -> Option<::async_executor::TaskRef> {
             type Fut = impl ::core::future::Future + 'static;
-            static mut #task_storage_ident: ::async_executor::TaskStorage<Fut> = ::async_executor::TaskStorage::new();
-            unsafe { #task_storage_ident.prepare_task(move || #task_inner_ident(#(#arg_names,)*)) }
+            const POOL_SIZE: usize = #pool_size;
+            static mut POOL: ::async_executor::TaskPool<Fut, POOL_SIZE> = ::async_executor::TaskPool::new();
+            unsafe { POOL.prepare_task(move || #task_inner_ident(#(#arg_names,)*)) }
         }
     };
 
@@ -103,8 +133,9 @@ fn task_run(f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
 }
 
 #[proc_macro_attribute]
-pub fn task(_: TS, item: TS) -> TS {
+pub fn task(args: TS, item: TS) -> TS {
+    let args = syn::parse_macro_input!(args as Args);
     let f = syn::parse_macro_input!(item as syn::ItemFn);
 
-    task_run(f).unwrap_or_else(|x| x).into()
+    task_pool_run(&args.meta, f).unwrap_or_else(|x| x).into()
 }
