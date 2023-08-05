@@ -13,9 +13,17 @@ use core::{cell::UnsafeCell, ptr::NonNull};
 use queue::TaskQueue;
 use util::UninitCell;
 
+pub(crate) const STATE_NONE: u8 = 0;
+pub(crate) const STATE_SPAWNED: u8 = 1 << 0;
+pub(crate) const STATE_IN_QUEUE: u8 = 1 << 1;
+
 /// TaskHeader contains the raw data regarding any task, the tasks are an abstraction on top of
 /// futures and hence the task header contains the raw data that is required to run a future.
 pub(crate) struct TaskHeader {
+    /// state represents the current state of the task, these values
+    /// could be either [STATE_NONE] or [STATE_SPAWNED] or [STATE_IN_QUEUE]
+    state: u8,
+
     /// queue_item is used to embed the task into executor's queue
     /// if there is any.
     queue_item: queue::TaskQueueEmbedItem,
@@ -48,6 +56,11 @@ impl TaskRef {
     /// header returns a static reference to the internal TaskHeader
     pub(crate) fn header(&self) -> &'static TaskHeader {
         unsafe { self.ptr.as_ref() }
+    }
+
+    /// mut_header returns a mutable static reference to the internal TaskHeader
+    pub(crate) fn mut_header(&mut self) -> &'static mut TaskHeader {
+        unsafe { self.ptr.as_mut() }
     }
 
     /// as_ptr returns a const pointer to TaskHeader
@@ -94,9 +107,12 @@ pub struct TaskStorage<F: Future + 'static> {
 }
 
 impl<F: Future + 'static> TaskStorage<F> {
+    const NEW: Self = Self::new();
+
     pub const fn new() -> Self {
         Self {
             raw: TaskHeader {
+                state: STATE_NONE,
                 queue_item: queue::TaskQueueEmbedItem::new(),
                 executor: UnsafeCell::new(None),
                 poll_fn: None,
@@ -115,12 +131,13 @@ impl<F: Future + 'static> TaskStorage<F> {
         }
 
         self.raw.poll_fn = Some(TaskStorage::<F>::poll);
+        self.raw.state = STATE_SPAWNED;
 
         TaskRef::new(self)
     }
 
     unsafe fn poll(p: TaskRef) {
-        let this = &*(p.as_ptr() as *const TaskStorage<F>);
+        let this = &mut *(p.as_ptr() as *mut TaskStorage<F>);
 
         let future = Pin::new_unchecked(this.future.as_mut());
         let waker = waker::from_task(p);
@@ -128,6 +145,9 @@ impl<F: Future + 'static> TaskStorage<F> {
         match future.poll(&mut ctx) {
             Poll::Ready(_) => {
                 this.future.drop_in_place();
+
+                this.raw.state &= !STATE_IN_QUEUE;
+                this.raw.state &= !STATE_SPAWNED;
             }
             Poll::Pending => {}
         }
@@ -135,6 +155,52 @@ impl<F: Future + 'static> TaskStorage<F> {
         // the compiler is emitting a virtual call for waker drop, but we know
         // it's a noop for our waker.
         mem::forget(waker);
+    }
+}
+
+struct AvailableTask<F: Future + 'static> {
+    task: &'static mut TaskStorage<F>,
+}
+
+impl<F: Future + 'static> AvailableTask<F> {
+    fn claim(task: &'static mut TaskStorage<F>) -> Option<Self> {
+        if task.raw.state != STATE_NONE {
+            None
+        } else {
+            Some(Self { task })
+        }
+    }
+
+    fn initialize(self, future: impl FnOnce() -> F) -> TaskRef {
+        self.task.raw.poll_fn = Some(TaskStorage::<F>::poll);
+        unsafe {
+            self.task.future.write(future());
+        }
+
+        self.task.raw.state = STATE_SPAWNED;
+
+        TaskRef::new(self.task)
+    }
+}
+
+/// Raw storage that can hold up to N tasks of the same type.
+///
+/// This is essentially a `[TaskStorage<F>; N]`.
+pub struct TaskPool<F: Future + 'static, const N: usize> {
+    pool: [TaskStorage<F>; N],
+}
+
+impl<F: Future + 'static, const N: usize> TaskPool<F, N> {
+    /// Create a new TaskPool, with all tasks in non-spawned state.
+    pub const fn new() -> Self {
+        Self {
+            pool: [TaskStorage::NEW; N],
+        }
+    }
+
+    pub fn prepare_task(&'static mut self, future: impl FnOnce() -> F) -> Option<TaskRef> {
+        let task = self.pool.iter_mut().find_map(AvailableTask::claim);
+        task.map(|task| task.initialize(future))
     }
 }
 
@@ -157,15 +223,20 @@ impl Executor {
     /// created via static TaskStorage. This ensures that no dynamic memory
     /// allocation happens but this also makes this interface harder to consume
     pub fn spawn_task(&'static self, t: TaskRef) {
-        self.enqueue(t);
+        let curr_state = t.header().state;
+
+        if curr_state & STATE_IN_QUEUE == 0 {
+            self.enqueue(t);
+        }
     }
 
     /// run starts a busy loop and keep polling the tasks forever
     pub fn run(&'static self, mut post_drain_fn: Option<impl FnMut()>) -> ! {
         loop {
             // Drain the user tasks
-            self.task_queue.drain(|taskptr| {
-                let task = taskptr.header();
+            self.task_queue.drain(|mut taskptr| {
+                let task = taskptr.mut_header();
+                task.state |= STATE_IN_QUEUE;
                 if let Some(poll) = task.poll_fn {
                     // # Safety: Implied
                     unsafe { poll(TaskRef::from_ptr(taskptr.as_ptr())) }
