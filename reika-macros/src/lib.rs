@@ -139,3 +139,46 @@ pub fn task(args: TS, item: TS) -> TS {
 
     task_pool_run(&args.meta, f).unwrap_or_else(|x| x).into()
 }
+
+#[proc_macro_derive(Future)]
+pub fn derive_future(input: TS) -> TS {
+    let syn::DeriveInput {
+        ident, generics, ..
+    } = syn::parse_macro_input!(input);
+
+    let inner = quote! {
+        type Output = std::io::Result<i32>;
+
+        fn poll(
+            mut self: std::pin::Pin<&mut Self>,
+            ctx: &mut std::task::Context<'_>,
+        ) -> std::task::Poll<Self::Output> {
+            if let Some(return_val) = self.req.return_val {
+                if return_val < 0 {
+                    return std::task::Poll::Ready(Err(std::io::Error::from_raw_os_error(-return_val)));
+                }
+
+                return std::task::Poll::Ready(Ok(return_val));
+            }
+
+            self.req.waker = Some(ctx.waker().clone());
+
+            unsafe {
+                if self.reactor.submit(&mut self.req).is_err() {
+                    // enqueue immediately
+                    ctx.waker().wake_by_ref();
+                }
+            }
+
+            std::task::Poll::Pending
+        }
+    };
+
+    let output = quote! {
+        impl #generics std::future::Future for #ident #generics {
+            #inner
+        }
+    };
+
+    output.into()
+}
