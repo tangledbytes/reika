@@ -54,6 +54,12 @@ impl Reactor {
         })
     }
 
+    /// submit takes a reference to request and submits the squeue entry part of it to
+    /// the underlying IO Ring.
+    ///
+    /// # Safety
+    /// It needs to be ensured the the [Request] and the data referred by the request lives
+    /// at least for as long as the request is in the queue.
     pub unsafe fn submit(&'static self, req: &mut Request) -> Result<(), RequestError> {
         let mutself = self.ring.get().as_mut().unwrap();
 
