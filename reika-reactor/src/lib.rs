@@ -1,3 +1,5 @@
 pub mod error;
 pub mod iouring;
-pub mod ops;
+mod ops;
+
+pub use ops::*;
