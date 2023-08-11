@@ -1,7 +1,6 @@
 #![no_std]
 
 mod queue;
-mod spawner;
 mod util;
 mod waker;
 
