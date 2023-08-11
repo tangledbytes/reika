@@ -1,6 +1,6 @@
 #![feature(type_alias_impl_trait)]
 
-use std::{env, process, str::FromStr};
+use std::env;
 
 use async_executor_util::PerThreadExecutor;
 use reika_reactor::io;
