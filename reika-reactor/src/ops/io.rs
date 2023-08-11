@@ -10,14 +10,16 @@ pub struct ReadMeta<'a> {
     phantom: PhantomData<&'a ()>,
 }
 
-pub fn read(fd: RawFd, buf: &'_ mut [u8]) -> ReadMeta<'_> {
+pub fn read(fd: RawFd, buf: &'_ mut [u8], offset: u64, rw_flags: i32) -> ReadMeta<'_> {
     let reactor = unsafe { iouring::Reactor::get_static() };
 
     let read_op = io_uring::opcode::Read::new(
         io_uring::types::Fd(fd),
         buf.as_mut_ptr() as *mut _,
         buf.len() as u32,
-    );
+    )
+    .offset(offset)
+    .rw_flags(rw_flags);
 
     let req = iouring::Request::new(read_op.build());
     ReadMeta {
@@ -34,13 +36,13 @@ pub struct OpenMeta {
     path: CString,
 }
 
-pub fn open(pathname: &str, flags: i32) -> OpenMeta {
+pub fn open(pathname: &str, flags: i32, mode: u32) -> OpenMeta {
     let reactor = unsafe { iouring::Reactor::get_static() };
 
     let path = CString::new(pathname).expect("pathname should not contain null bytes");
 
     let open_op = io_uring::opcode::OpenAt::new(io_uring::types::Fd(libc::AT_FDCWD), path.as_ptr())
-        .flags(flags);
+        .flags(flags).mode(mode);
 
     let req = iouring::Request::new(open_op.build());
 
@@ -56,8 +58,8 @@ pub struct CloseMeta {
 pub fn close(fd: RawFd) -> CloseMeta {
     let reactor = unsafe { iouring::Reactor::get_static() };
 
-    let open_op = io_uring::opcode::Close::new(io_uring::types::Fd(fd));
-    let req = iouring::Request::new(open_op.build());
+    let close_op = io_uring::opcode::Close::new(io_uring::types::Fd(fd));
+    let req = iouring::Request::new(close_op.build());
 
     CloseMeta { reactor, req }
 }
