@@ -2,8 +2,7 @@ use crate::{TaskHeader, TaskRef};
 
 use core::{
     cell::UnsafeCell,
-    ptr::null_mut,
-    ptr::{replace, NonNull},
+    ptr::{null_mut, replace, NonNull},
 };
 
 /// TaskQueueEmbedItem should be embedded into any struct that needs to be
@@ -54,7 +53,7 @@ impl TaskQueue {
         let prev = NonNull::new(self.head.get().replace(task.as_ptr() as *mut _))
             .map(|ptr| TaskRef::from_ptr(ptr.as_ptr()));
 
-        task.header().queue_item.next.get().replace(prev);
+        task.header().executor_queue_item.next.get().replace(prev);
     }
 
     /// drain drains the entire queue and calls `on_task` for each task that
@@ -69,11 +68,74 @@ impl TaskQueue {
         let mut next = unsafe { NonNull::new(curr).map(|ptr| TaskRef::from_ptr(ptr.as_ptr())) };
 
         while let Some(task) = next {
-            if let Some(task) =
-                unsafe { replace(&mut next, task.header().queue_item.next.get().replace(None)) }
-            {
+            if let Some(task) = unsafe {
+                replace(
+                    &mut next,
+                    task.header().executor_queue_item.next.get().replace(None),
+                )
+            } {
                 on_task(task);
             }
         }
+    }
+}
+
+/// TaskFreeListEmbedItem should be embedded into any struct that needs to be
+/// enqueued into the tasks free list.
+pub(crate) struct TaskFreeListEmbedItem {
+    next: UnsafeCell<Option<TaskRef>>,
+}
+impl TaskFreeListEmbedItem {
+    pub const fn new() -> Self {
+        Self {
+            next: UnsafeCell::new(None),
+        }
+    }
+}
+
+/// TaskFreeList is similar to [TaskFreeList]
+pub struct TaskFreeList {
+    head: UnsafeCell<*mut TaskHeader>,
+}
+
+impl TaskFreeList {
+    pub const fn new() -> Self {
+        Self {
+            head: UnsafeCell::new(null_mut()),
+        }
+    }
+
+    /// # Safety
+    /// The caller must ensure that the task is not already in the queue.
+    pub unsafe fn enqueue(&self, task: TaskRef) {
+        let prev = NonNull::new(self.head.get().replace(task.as_ptr() as *mut _))
+            .map(|ptr| TaskRef::from_ptr(ptr.as_ptr()));
+
+        task.header().task_pool_queue_item.next.get().replace(prev);
+    }
+
+    /// # Safety
+    /// The caller must ensure that the TaskRef's headers are properly initialized
+    pub unsafe fn dequeue(&self) -> Option<TaskRef> {
+        // # Safety
+        // For as long as it is ensured that the enqueue method is called only with valid TaskRef
+        // and they are not in the queue already.
+        // Also, dereferencing the pointer should be OK as well as the map will be invoked iff
+        // head is valid.
+        let head = NonNull::new(self.head.get()).map(|head| TaskRef::from_ptr(*head.as_ptr()));
+
+        if let Some(head) = &head {
+            // # Safety
+            // `next` will always be valid, it can be `None` but it will always be valid so dereferencing
+            // should be safe
+            let mut newhead = *head.header().task_pool_queue_item.next.get();
+            if let Some(newhead) = &mut newhead {
+                self.head.get().replace(newhead.mut_header() as *mut _);
+            } else {
+                self.head.get().replace(null_mut());
+            }
+        }
+
+        head
     }
 }
