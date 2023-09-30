@@ -9,10 +9,10 @@ async fn read_file(path: &str) {
     let res = io::open(path, 0, 0).await.unwrap();
     let mut buf = [0; 4096];
 
-    let mut total_read = 0i32;
+    let mut total_read = 0i64;
     loop {
-        let read = io::read(res, &mut buf, total_read as u64, 0).await.unwrap();
-        total_read += read;
+        let read = io::read_at(res, &mut buf, total_read).await.unwrap();
+        total_read += read as i64;
 
         print!(
             "{}",
@@ -41,7 +41,7 @@ fn main() {
 
     PerThreadExecutor::run(Some(|| {
         let rx = unsafe { reika_reactor::iouring::Reactor::get_static() };
-        if rx.run_for_ns(1000).is_err() {
+        if rx.run_for_ns(0).is_err() {
             println!("oops, reactor failed");
         }
     }));
