@@ -8,4 +8,5 @@ members = [
     "reika-reactor",
     "async-executor-util",
     "examples/cat",
+    "examples/cp"
 ]
