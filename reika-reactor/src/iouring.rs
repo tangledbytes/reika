@@ -7,6 +7,49 @@ use std::{cell::UnsafeCell, io, task::Waker};
 
 use crate::error::{InitFail, RequestError};
 
+pub struct PerThreadReactor;
+
+impl PerThreadReactor {
+    thread_local! {
+        static REACTOR: Result<Reactor, InitFail> = Reactor::new(1024);
+    }
+
+    /// this returns a static reference to the reactor
+    /// (for current thread).
+    ///
+    /// # Safety
+    /// The consumer of the function needs to ensure that the returned reference
+    /// does NOT outlive the thread (that is, it should not be sent to other threads!)
+    pub(crate) unsafe fn this() -> &'static Reactor {
+        Self::REACTOR.with(|reactor_res: &Result<Reactor, InitFail>| {
+            let reactor = reactor_res.as_ref().unwrap();
+
+            _make_static(reactor)
+        })
+    }
+
+    /// submit takes a reference to request and submits the squeue entry part of it to
+    /// the underlying IO Ring.
+    ///
+    /// # Safety
+    /// It needs to be ensured the the [Request] and the data referred by the request lives
+    /// at least for as long as the request is in the queue.
+    pub(crate) unsafe fn submit(req: &mut Request) -> Result<(), RequestError> {
+        let reactor = Self::this();
+        reactor.submit(req)
+    }
+
+    pub fn flush(want: usize, timeouts: usize, etime: bool) -> io::Result<(usize, bool)> {
+        let reactor = unsafe { Self::this() };
+        reactor.flush(want, timeouts, etime)
+    }
+
+    pub fn run_for_ns(ns: u32) -> io::Result<()> {
+        let reactor = unsafe { Self::this() };
+        reactor.run_for_ns(ns)
+    }
+}
+
 pub struct Reactor {
     ring: UnsafeCell<IoUring>,
 }
@@ -28,29 +71,11 @@ impl Request {
 }
 
 impl Reactor {
-    thread_local! {
-        static REACTOR: Result<Reactor, InitFail> = Reactor::new(1024);
-    }
-
     pub fn new(entries: u32) -> Result<Self, InitFail> {
         let ring =
             IoUring::new(entries).map_err(|_| InitFail::new("failed to initialize the ring"))?;
         Ok(Self {
             ring: UnsafeCell::new(ring),
-        })
-    }
-
-    /// get_static returns a static reference to the reactor
-    /// (for current thread).
-    ///
-    /// # Safety
-    /// The consumer of the function needs to ensure that the returned reference
-    /// does NOT outlive the thread (that is, it should not be sent to other threads!)
-    pub unsafe fn get_static() -> &'static Reactor {
-        Self::REACTOR.with(|reactor_res: &Result<Reactor, InitFail>| {
-            let reactor = reactor_res.as_ref().unwrap();
-
-            _make_static(reactor)
         })
     }
 

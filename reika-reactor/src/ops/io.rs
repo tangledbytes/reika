@@ -12,7 +12,7 @@ pub struct ReadMeta<'a> {
 }
 
 pub fn read(fd: RawFd, buf: &'_ mut [u8]) -> ReadMeta<'_> {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let read_op = io_uring::opcode::Read::new(
         io_uring::types::Fd(fd),
@@ -31,7 +31,7 @@ pub fn read(fd: RawFd, buf: &'_ mut [u8]) -> ReadMeta<'_> {
 }
 
 pub fn read_at(fd: RawFd, buf: &'_ mut [u8], offset: i64) -> ReadMeta<'_> {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let read_op = io_uring::opcode::Read::new(
         io_uring::types::Fd(fd),
@@ -56,7 +56,7 @@ pub struct OpenMeta {
 }
 
 pub fn open(pathname: &str, flags: i32, mode: u32) -> OpenMeta {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let path = CString::new(pathname).expect("pathname should not contain null bytes");
 
@@ -75,7 +75,7 @@ pub struct CloseMeta {
 }
 
 pub fn close(fd: RawFd) -> CloseMeta {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let close_op = io_uring::opcode::Close::new(io_uring::types::Fd(fd));
     let req = iouring::Request::new(close_op.build());
@@ -92,7 +92,7 @@ pub struct WriteMeta<'a> {
 }
 
 pub fn write(fd: RawFd, buf: &'_ mut [u8]) -> WriteMeta<'_> {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let write_op = io_uring::opcode::Write::new(
         io_uring::types::Fd(fd),
@@ -111,7 +111,7 @@ pub fn write(fd: RawFd, buf: &'_ mut [u8]) -> WriteMeta<'_> {
 }
 
 pub fn write_at(fd: RawFd, buf: &'_ mut [u8], offset: i64) -> WriteMeta<'_> {
-    let reactor = unsafe { iouring::Reactor::get_static() };
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
 
     let write_op = io_uring::opcode::Write::new(
         io_uring::types::Fd(fd),
@@ -125,5 +125,23 @@ pub fn write_at(fd: RawFd, buf: &'_ mut [u8], offset: i64) -> WriteMeta<'_> {
         reactor,
         req,
         phantom: PhantomData {},
+    }
+}
+
+#[derive(reika_macros::Future)]
+pub struct FsyncMeta {
+    reactor: &'static iouring::Reactor,
+    req: iouring::Request,
+}
+
+pub fn fsync(fd: RawFd) -> FsyncMeta {
+    let reactor = unsafe { iouring::PerThreadReactor::this() };
+
+    let fsync_op = io_uring::opcode::Fsync::new(io_uring::types::Fd(fd));
+
+    let req = iouring::Request::new(fsync_op.build());
+    FsyncMeta {
+        reactor,
+        req,
     }
 }

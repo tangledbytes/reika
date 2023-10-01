@@ -44,8 +44,7 @@ fn main() {
     PerThreadExecutor::spawn_task(entry().unwrap());
 
     PerThreadExecutor::run(Some(|| {
-        let rx = unsafe { reika_reactor::iouring::Reactor::get_static() };
-        if rx.run_for_ns(0).is_err() {
+        if reika_reactor::iouring::PerThreadReactor::flush(0, 0, false).is_err() {
             println!("oops, reactor failed");
         }
     }));
