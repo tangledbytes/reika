@@ -6,26 +6,22 @@ use async_executor_util::PerThreadExecutor;
 use reika_reactor::io;
 
 async fn copy_file(src: &str, dest: &str) {
-    let src = io::open(src, 0, 0).await.unwrap();
-    let dest = io::open(
-        dest,
-        io::libc::O_CREAT | io::libc::O_WRONLY,
-        0o777
-    ).await.unwrap();
+    let src = io::File::open(src).await.unwrap();
+    let dest = io::File::options().create(true).write(true).open(dest).await.unwrap();
 
     let mut buf = [0; 4096];
 
     loop {
-        let read = io::read(src, &mut buf).await.unwrap();
-        let _ = io::write(dest, &mut buf[0..(read as usize)]).await.unwrap();
+        let read = src.read(&mut buf).await.unwrap();
+        let _ = dest.write(&mut buf[0..(read as usize)]).await.unwrap();
 
         if read < buf.len() as _ {
             break;
         }
     }
 
-    let _res = io::close(src).await.unwrap();
-    let _res = io::close(dest).await.unwrap();
+    src.close().await.unwrap();
+    dest.close().await.unwrap();
 }
 
 #[reika_macros::task]
@@ -44,7 +40,7 @@ fn main() {
     PerThreadExecutor::spawn_task(entry().unwrap());
 
     PerThreadExecutor::run(Some(|| {
-        if reika_reactor::iouring::PerThreadReactor::flush(0, 0, false).is_err() {
+        if reika_reactor::PerThreadReactor::flush(0, 0, false).is_err() {
             println!("oops, reactor failed");
         }
     }));

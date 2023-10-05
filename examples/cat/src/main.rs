@@ -6,13 +6,12 @@ use async_executor_util::PerThreadExecutor;
 use reika_reactor::io;
 
 async fn read_file(path: &str) {
-    let res = io::open(path, 0, 0).await.unwrap();
+    let file = io::File::open(path).await.unwrap();
+
     let mut buf = [0; 4096];
 
-    let mut total_read = 0i64;
     loop {
-        let read = io::read_at(res, &mut buf, total_read).await.unwrap();
-        total_read += read as i64;
+        let read = file.read(&mut buf).await.unwrap();
 
         print!(
             "{}",
@@ -24,7 +23,7 @@ async fn read_file(path: &str) {
         }
     }
 
-    let _res = io::close(res).await.unwrap();
+    file.close().await.unwrap();
 }
 
 #[reika_macros::task]
@@ -40,7 +39,7 @@ fn main() {
     PerThreadExecutor::spawn_task(entry().unwrap());
 
     PerThreadExecutor::run(Some(|| {
-        if reika_reactor::iouring::PerThreadReactor::run_for_ns(0).is_err() {
+        if reika_reactor::PerThreadReactor::run_for_ns(0).is_err() {
             println!("oops, reactor failed");
         }
     }));
