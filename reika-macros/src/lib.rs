@@ -28,15 +28,66 @@ impl Parse for Args {
 struct Args2 {
     #[darling(default)]
     pool_size: Option<syn::Expr>,
+    #[darling(default)]
+    pool_size_env: Option<syn::LitStr>,
 }
 
 fn task_pool_run(args: &[NestedMeta], f: syn::ItemFn) -> Result<TokenStream, TokenStream> {
     let args = Args2::from_list(args).map_err(|e| e.write_errors())?;
 
-    let pool_size = args.pool_size.unwrap_or(Expr::Lit(ExprLit {
-        attrs: vec![],
-        lit: Lit::Int(LitInt::new("1", Span::call_site())),
-    }));
+    let pool_size_env = match &args.pool_size_env {
+        Some(lit) => {
+            let env = lit.value().to_string();
+            if let Ok(var) = std::env::var(&env) {
+                Some(var)
+            } else {
+                None
+            }
+        }
+        None => None,
+    };
+
+    let pool_size = match &args.pool_size {
+        Some(Expr::Lit(ExprLit { ref lit, attrs: _ })) => match lit {
+            Lit::Str(v) => match v.parse::<LitInt>() {
+                Ok(parsed_pool_size) => Expr::Lit(ExprLit {
+                    attrs: vec![],
+                    lit: Lit::Int(parsed_pool_size),
+                }),
+                Err(_) => {
+                    let err = syn::Error::new(Span::call_site(), "is not valid number");
+                    return Err(syn::Error::to_compile_error(&err));
+                }
+            },
+            Lit::Int(v) => Expr::Lit(ExprLit {
+                attrs: vec![],
+                lit: Lit::Int(v.clone()),
+            }),
+            _ => {
+                let err = syn::Error::new(
+                    Span::call_site(),
+                    "only integer and string literals are allowed",
+                );
+                return Err(syn::Error::to_compile_error(&err));
+            }
+        },
+        Some(Expr::Macro(macr)) => Expr::Macro(macr.clone()),
+        Some(_) => {
+            let err = syn::Error::new(Span::call_site(), "only literals and macros are allowed");
+            return Err(syn::Error::to_compile_error(&err));
+        }
+        None => {
+            let litval = match &pool_size_env {
+                Some(val) => val.clone(),
+                None => "1".to_string(),
+            };
+
+            Expr::Lit(ExprLit {
+                attrs: vec![],
+                lit: Lit::Int(LitInt::new(&litval, Span::call_site())),
+            })
+        }
+    };
 
     if f.sig.asyncness.is_none() {
         let err = syn::Error::new_spanned(&f.sig, "task functions must be async");
