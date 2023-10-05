@@ -95,7 +95,7 @@ impl TaskFreeListEmbedItem {
 
 /// TaskFreeList is similar to [TaskFreeList]
 pub struct TaskFreeList {
-    head: UnsafeCell<*mut TaskHeader>,
+    pub(crate) head: UnsafeCell<*mut TaskHeader>,
 }
 
 impl TaskFreeList {
@@ -122,7 +122,7 @@ impl TaskFreeList {
         // and they are not in the queue already.
         // Also, dereferencing the pointer should be OK as well as the map will be invoked iff
         // head is valid.
-        let head = NonNull::new(self.head.get()).map(|head| TaskRef::from_ptr(*head.as_ptr()));
+        let head = NonNull::new(*self.head.get()).map(|head| TaskRef::from_ptr(head.as_ptr()));
 
         if let Some(head) = &head {
             // # Safety

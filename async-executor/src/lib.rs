@@ -24,7 +24,7 @@ pub(crate) struct TaskHeader {
 
     /// poll_fn is the function which will be called whenever the executor of the task
     /// wishes to poll the underlying future.
-    poll_fn: Option<unsafe fn(TaskRef)>,
+    poll_fn: Option<unsafe fn(TaskRef) -> bool>,
 
     /// task_pool_queue_item is used to embed the task into task pool's free
     /// list.
@@ -154,8 +154,9 @@ impl<F: Future + 'static> TaskStorage<F> {
         TaskRef::new(self)
     }
 
-    unsafe fn poll(p: TaskRef) {
+    unsafe fn poll(p: TaskRef) -> bool {
         let this = &mut *(p.as_ptr() as *mut TaskStorage<F>);
+        let mut res = false;
 
         let future = Pin::new_unchecked(this.future.as_mut());
         let waker = waker::from_task(p);
@@ -163,14 +164,7 @@ impl<F: Future + 'static> TaskStorage<F> {
         match future.poll(&mut ctx) {
             Poll::Ready(_) => {
                 this.future.drop_in_place();
-
-                let ex = *p.header().executor.get();
-                if let Some(ex) = ex {
-                    let queued = ex.spawned.get();
-                    assert!(!queued.is_null());
-
-                    *queued -= 1;
-                }
+                res = true;
             }
             Poll::Pending => {}
         }
@@ -178,6 +172,8 @@ impl<F: Future + 'static> TaskStorage<F> {
         // the compiler is emitting a virtual call for waker drop, but we know
         // it's a noop for our waker.
         mem::forget(waker);
+
+        res
     }
 }
 
@@ -293,13 +289,19 @@ impl Executor {
 
                 if let Some(poll) = task.poll_fn {
                     // # Safety: Implied
-                    unsafe { poll(TaskRef::from_ptr(taskptr.as_ptr())) }
-                }
+                    let finished = unsafe { poll(TaskRef::from_ptr(taskptr.as_ptr())) };
+                    if finished {
+                        if let Some(task_pool_finalizer) = task.task_pool_finalizer_fn {
+                            // # Safety: Implied
+                            unsafe {
+                                task_pool_finalizer(task.task_pool_ptr, TaskRef::from_ptr(taskptr.as_ptr()))
+                            }
+                        }
 
-                if let Some(task_pool_finalizer) = task.task_pool_finalizer_fn {
-                    // # Safety: Implied
-                    unsafe {
-                        task_pool_finalizer(task.task_pool_ptr, TaskRef::from_ptr(taskptr.as_ptr()))
+                        let queued = self.spawned.get();
+                        assert!(!queued.is_null());
+
+                        unsafe { *queued -= 1; }
                     }
                 }
             });
