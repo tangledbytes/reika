@@ -103,6 +103,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9cdc71e17332e86d2e1d38c1f99edcb6288ee11b815fb1a4b049eaa2114d369b"
 
 [[package]]
+name = "playground"
+version = "0.1.0"
+dependencies = [
+ "async-executor",
+ "async-executor-util",
+ "reika-macros",
+ "reika-reactor",
+]
+
+[[package]]
 name = "proc-macro2"
 version = "1.0.67"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -164,6 +174,16 @@ dependencies = [
  "proc-macro2",
  "quote",
  "unicode-ident",
+]
+
+[[package]]
+name = "tcpecho"
+version = "0.1.0"
+dependencies = [
+ "async-executor",
+ "async-executor-util",
+ "reika-macros",
+ "reika-reactor",
 ]
 
 [[package]]
