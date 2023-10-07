@@ -2,8 +2,8 @@
 
 use std::env;
 
-use async_executor_util::PerThreadExecutor;
-use reika_reactor::io;
+use reika::executor::PerThreadExecutor;
+use reika::reactor::io;
 
 async fn copy_file(src: &str, dest: &str) {
     let src = io::File::open(src).await.unwrap();
@@ -24,7 +24,7 @@ async fn copy_file(src: &str, dest: &str) {
     dest.close().await.unwrap();
 }
 
-#[reika_macros::task]
+#[reika::macros::task]
 async fn entry() {
     let src = env::args()
         .nth(1)
@@ -40,7 +40,7 @@ fn main() {
     PerThreadExecutor::spawn_task(entry().unwrap());
 
     PerThreadExecutor::run(Some(|| {
-        if reika_reactor::PerThreadReactor::flush(0, 0, false).is_err() {
+        if reika::reactor::PerThreadReactor::flush(0, 0, false).is_err() {
             println!("oops, reactor failed");
         }
     }));

@@ -8,13 +8,11 @@ extern crate libc;
 use io_uring::{squeue, IoUring};
 use std::{cell::UnsafeCell, io as stdio, task::Waker};
 
-use crate::error::{InitFail, RequestError};
-
 pub struct PerThreadReactor;
 
 impl PerThreadReactor {
     thread_local! {
-        static REACTOR: Result<Reactor, InitFail> = Reactor::new(1024);
+        static REACTOR: stdio::Result<Reactor> = Reactor::new(512);
     }
 
     /// this returns a static reference to the reactor
@@ -24,7 +22,7 @@ impl PerThreadReactor {
     /// The consumer of the function needs to ensure that the returned reference
     /// does NOT outlive the thread (that is, it should not be sent to other threads!)
     pub(crate) unsafe fn this() -> &'static Reactor {
-        Self::REACTOR.with(|reactor_res: &Result<Reactor, InitFail>| {
+        Self::REACTOR.with(|reactor_res: &stdio::Result<Reactor>| {
             let reactor = reactor_res.as_ref().unwrap();
 
             _make_static(reactor)
@@ -37,7 +35,7 @@ impl PerThreadReactor {
     /// # Safety
     /// It needs to be ensured the the [Request] and the data referred by the request lives
     /// at least for as long as the request is in the queue.
-    pub(crate) unsafe fn submit(req: &mut ReactorRequest) -> Result<(), RequestError> {
+    pub(crate) unsafe fn submit(req: &mut ReactorRequest) -> stdio::Result<()> {
         let reactor = Self::this();
         reactor.submit(req)
     }
@@ -45,6 +43,11 @@ impl PerThreadReactor {
     pub fn flush(want: usize, timeouts: usize, etime: bool) -> stdio::Result<(usize, bool)> {
         let reactor = unsafe { Self::this() };
         reactor.flush(want, timeouts, etime)
+    }
+
+    pub fn run(ns: u32) -> stdio::Result<()> {
+        let reactor = unsafe { Self::this() };
+        reactor.run(ns)
     }
 
     pub fn run_for_ns(ns: u32) -> stdio::Result<()> {
@@ -55,6 +58,7 @@ impl PerThreadReactor {
 
 pub struct Reactor {
     ring: UnsafeCell<IoUring>,
+    req_queued: UnsafeCell<usize>,
 }
 
 pub struct ReactorRequest {
@@ -74,11 +78,15 @@ impl ReactorRequest {
 }
 
 impl Reactor {
-    pub fn new(entries: u32) -> Result<Self, InitFail> {
-        let ring =
-            IoUring::new(entries).map_err(|_| InitFail::new("failed to initialize the ring"))?;
+    pub fn new(entries: u32) -> stdio::Result<Self> {
+        let ring: io_uring::IoUring<io_uring::squeue::Entry, io_uring::cqueue::Entry> =
+            IoUring::builder()
+                .setup_coop_taskrun()
+                .setup_single_issuer()
+                .build(entries)?;
         Ok(Self {
             ring: UnsafeCell::new(ring),
+            req_queued: UnsafeCell::new(0),
         })
     }
 
@@ -88,15 +96,18 @@ impl Reactor {
     /// # Safety
     /// It needs to be ensured the the [Request] and the data referred by the request lives
     /// at least for as long as the request is in the queue.
-    pub unsafe fn submit(&'static self, req: &mut ReactorRequest) -> Result<(), RequestError> {
-        let mutself = self.ring.get().as_mut().unwrap();
+    pub unsafe fn submit(&'static self, req: &mut ReactorRequest) -> stdio::Result<()> {
+        let mutreq = self.req_queued.get().as_mut().unwrap();
+        *mutreq += 1;
+
+        let mutring = self.ring.get().as_mut().unwrap();
 
         req.sentry = req.sentry.clone().user_data(req as *mut _ as u64);
 
-        mutself
+        mutring
             .submission()
             .push(&req.sentry)
-            .map_err(|_| RequestError::Push)?;
+            .map_err(|_| stdio::Error::new(stdio::ErrorKind::Other, "failed to submit IO"))?;
 
         Ok(())
     }
@@ -104,6 +115,15 @@ impl Reactor {
     pub fn flush(&self, want: usize, timeouts: usize, etime: bool) -> stdio::Result<(usize, bool)> {
         self.flush_submissions(want, timeouts, etime)?;
         self.flush_completions(0, timeouts, etime)
+    }
+    pub fn run(&self, ns: u32) -> stdio::Result<()> {
+        self.flush(0, 0, false);
+
+        if !self.requires_reaping() {
+            self.run_for_ns(ns)
+        } else {
+            Ok(())
+        }
     }
 
     pub fn run_for_ns(&self, ns: u32) -> stdio::Result<()> {
@@ -150,6 +170,12 @@ impl Reactor {
         Ok(())
     }
 
+    fn requires_reaping(&self) -> bool {
+        let mutreq = unsafe { self.req_queued.get().as_mut().unwrap() };
+
+        *mutreq > 0
+    }
+
     fn flush_submissions(
         &self,
         want: usize,
@@ -191,6 +217,7 @@ impl Reactor {
         let mut timeouts = timeouts;
         let mut etime = etime;
 
+        let mutreq = unsafe { self.req_queued.get().as_mut().unwrap() };
         let mutself = unsafe { self.ring.get().as_mut().unwrap() };
 
         loop {
@@ -210,6 +237,8 @@ impl Reactor {
                     collected += 1;
                 }
             }
+
+            *mutreq -= collected;
 
             // Keep looping till we collect at least `want` completions
             if collected >= want {

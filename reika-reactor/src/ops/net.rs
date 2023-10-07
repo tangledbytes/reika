@@ -4,7 +4,7 @@ use std::mem::size_of;
 use std::net::{Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::os::fd::RawFd;
 
-use crate::{Reactor, ReactorRequest, io, PerThreadReactor};
+use crate::{io, PerThreadReactor, Reactor, ReactorRequest};
 
 pub const SOMAXCONN: i32 = libc::SOMAXCONN;
 
@@ -57,6 +57,7 @@ impl TcpListner {
                 let socket =
                     Self::socket(libc::AF_INET, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0).await?;
                 unsafe {
+                    Self::defaultsockopt(socket)?;
                     Self::_bind4(socket, a.ip(), a.port())?;
                 }
                 socket
@@ -65,6 +66,7 @@ impl TcpListner {
                 let socket =
                     Self::socket(libc::AF_INET6, libc::SOCK_STREAM | libc::SOCK_CLOEXEC, 0).await?;
                 unsafe {
+                    Self::defaultsockopt(socket)?;
                     Self::_bind6(socket, a.ip(), a.port())?;
                 }
                 socket
@@ -76,7 +78,6 @@ impl TcpListner {
         }
 
         unsafe {
-            Self::defaultsockopt(sock_fd)?;
             Self::listen(sock_fd, backlog)?;
         }
 
@@ -123,7 +124,7 @@ impl TcpListner {
         let res = libc::setsockopt(
             socket,
             libc::SOL_SOCKET,
-            libc::SO_REUSEADDR,
+            libc::SO_REUSEPORT,
             &yes as *const _ as *const libc::c_void,
             size_of::<i32>() as _,
         );
@@ -164,23 +165,23 @@ impl TcpListner {
 }
 
 impl TcpStream {
-	#[inline(always)]
+    #[inline(always)]
     pub async fn read(&self, buf: &'_ mut [u8]) -> Result<usize> {
         let readbytes = Self::_read(self.connfd, buf).await?;
         Ok(readbytes as usize)
     }
 
-	#[inline(always)]
+    #[inline(always)]
     pub async fn send(&mut self, buf: &'_ [u8]) -> Result<usize> {
         let sendbytes = Self::_write(self.connfd, buf).await?;
         Ok(sendbytes as usize)
     }
 
-	#[inline(always)]
-	pub async fn close(&mut self) -> Result<()> {
-		let _ = io::raw::close(self.connfd).await?;
-		Ok(())
-	}
+    #[inline(always)]
+    pub async fn close(&mut self) -> Result<()> {
+        let _ = io::raw::close(self.connfd).await?;
+        Ok(())
+    }
 
     fn _write(fd: RawFd, buf: &'_ [u8]) -> TcpWriteMeta<'_> {
         let reactor = unsafe { PerThreadReactor::this() };

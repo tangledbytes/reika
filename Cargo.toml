@@ -6,7 +6,7 @@ members = [
     "reika-macros",
     "reika-storage",
     "reika-reactor",
-    "async-executor-util",
+    "reika",
     "examples/cat",
     "examples/cp",
     "examples/playground",
